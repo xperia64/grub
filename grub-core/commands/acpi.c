@@ -96,6 +96,14 @@ static struct efiemu_acpi_table acpi_tables = {
 
 static struct efiemu_acpi_table *acpi_tables_tail = &acpi_tables;
 
+static struct efiemu_acpi_table user_tables = {
+  0,
+  0,
+  0
+};
+
+static struct efiemu_acpi_table *user_tables_tail = &user_tables;
+
 /* DSDT isn't in RSDT. So treat it specially. */
 static void *table_dsdt = 0;
 /* Pointer to recreated RSDT. */
@@ -467,8 +475,10 @@ free_tables (void)
       cur = cur->next;
       grub_free (t);
     }
-  acpi_tables_tail = 0;
   acpi_tables.next = 0;
+  acpi_tables_tail = &acpi_tables;
+  user_tables.next = 0;
+  user_tables_tail = &user_tables;
   table_dsdt = 0;
 }
 
@@ -717,9 +727,18 @@ grub_cmd_acpi (struct grub_extcmd_context *ctxt, int argc, char **args)
 	  table->next = 0;
 	  playground_size += table->size;
 
-	  acpi_tables_tail->next = table;
-	  acpi_tables_tail = table;
+	  user_tables_tail->next = table;
+	  user_tables_tail = table;
 	}
+    }
+
+  /* Prepend the user tables before the host tables so overrides work. */
+  if (user_tables.next)
+    {
+      struct efiemu_acpi_table *host_tables_head;
+      host_tables_head = acpi_tables.next;
+      acpi_tables.next = user_tables.next;
+      user_tables_tail->next = host_tables_head;
     }
 
   numoftables = 0;
@@ -764,8 +783,10 @@ grub_cmd_acpi (struct grub_extcmd_context *ctxt, int argc, char **args)
       cur = cur->next;
       grub_free (t);
     }
-  acpi_tables_tail = 0;
   acpi_tables.next = 0;
+  acpi_tables_tail = &acpi_tables;
+  user_tables.next = 0;
+  user_tables_tail = &user_tables;
 
 #if defined (__i386__) || defined (__x86_64__)
   if (! state[9].set)
