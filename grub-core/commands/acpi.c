@@ -87,7 +87,14 @@ struct efiemu_acpi_table
   grub_size_t size;
   struct efiemu_acpi_table *next;
 };
-static struct efiemu_acpi_table *acpi_tables = 0;
+
+static struct efiemu_acpi_table acpi_tables = {
+  0,
+  0,
+  0
+};
+
+static struct efiemu_acpi_table *acpi_tables_tail = &acpi_tables;
 
 /* DSDT isn't in RSDT. So treat it specially. */
 static void *table_dsdt = 0;
@@ -321,7 +328,7 @@ setup_common_tables (void)
   playground_ptr += dsdt_size;
 
   /* Treat other tables. */
-  for (cur = acpi_tables; cur; cur = cur->next)
+  for (cur = acpi_tables.next; cur; cur = cur->next)
     {
       struct grub_acpi_fadt *fadt;
 
@@ -353,7 +360,7 @@ setup_common_tables (void)
 
   /* Fill RSDT entries. */
   numoftables = 0;
-  for (cur = acpi_tables; cur; cur = cur->next)
+  for (cur = acpi_tables.next; cur; cur = cur->next)
     numoftables++;
 
   rsdt_addr = rsdt = (struct grub_acpi_table_header *) playground_ptr;
@@ -371,7 +378,7 @@ setup_common_tables (void)
   grub_memcpy (&(rsdt->creator_id), root_creator_id, sizeof (rsdt->creator_id));
   rsdt->creator_rev = root_creator_rev;
 
-  for (cur = acpi_tables; cur; cur = cur->next)
+  for (cur = acpi_tables.next; cur; cur = cur->next)
     *(rsdt_entry++) = (grub_addr_t) cur->addr;
 
   /* Recompute checksum. */
@@ -406,7 +413,7 @@ setv2table (void)
   int numoftables;
 
   numoftables = 0;
-  for (cur = acpi_tables; cur; cur = cur->next)
+  for (cur = acpi_tables.next; cur; cur = cur->next)
     numoftables++;
 
   /* Create XSDT. */
@@ -414,7 +421,7 @@ setv2table (void)
   playground_ptr += sizeof (struct grub_acpi_table_header) + sizeof (grub_uint64_t) * numoftables;
 
   xsdt_entry = (grub_uint64_t *)(xsdt + 1);
-  for (cur = acpi_tables; cur; cur = cur->next)
+  for (cur = acpi_tables.next; cur; cur = cur->next)
     *(xsdt_entry++) = (grub_addr_t) cur->addr;
   grub_memcpy (&(xsdt->signature), "XSDT", 4);
   xsdt->length = sizeof (struct grub_acpi_table_header) + sizeof (grub_uint64_t) * numoftables;
@@ -453,14 +460,15 @@ free_tables (void)
   struct efiemu_acpi_table *cur, *t;
   if (table_dsdt)
     grub_free (table_dsdt);
-  for (cur = acpi_tables; cur;)
+  for (cur = acpi_tables.next; cur;)
     {
       t = cur;
       grub_free (cur->addr);
       cur = cur->next;
       grub_free (t);
     }
-  acpi_tables = 0;
+  acpi_tables_tail = 0;
+  acpi_tables.next = 0;
   table_dsdt = 0;
 }
 
@@ -605,6 +613,7 @@ grub_cmd_acpi (struct grub_extcmd_context *ctxt, int argc, char **args)
 	    }
 	  table->size = curtable->length;
 	  table->addr = grub_malloc (table->size);
+	  table->next = 0;
 	  playground_size += table->size;
 	  if (! table->addr)
 	    {
@@ -614,8 +623,8 @@ grub_cmd_acpi (struct grub_extcmd_context *ctxt, int argc, char **args)
 	      grub_free (table);
 	      return grub_errno;
 	    }
-	  table->next = acpi_tables;
-	  acpi_tables = table;
+	  acpi_tables_tail->next = table;
+	  acpi_tables_tail = table;
 	  grub_memcpy (table->addr, curtable, table->size);
 	}
       grub_free (exclude);
@@ -650,7 +659,6 @@ grub_cmd_acpi (struct grub_extcmd_context *ctxt, int argc, char **args)
       grub_file_t file;
       grub_size_t size;
       char *buf;
-
       file = grub_file_open (args[i], GRUB_FILE_TYPE_ACPI_TABLE);
       if (! file)
 	{
@@ -706,15 +714,16 @@ grub_cmd_acpi (struct grub_extcmd_context *ctxt, int argc, char **args)
 
 	  table->size = size;
 	  table->addr = buf;
+	  table->next = 0;
 	  playground_size += table->size;
 
-	  table->next = acpi_tables;
-	  acpi_tables = table;
+	  acpi_tables_tail->next = table;
+	  acpi_tables_tail = table;
 	}
     }
 
   numoftables = 0;
-  for (cur = acpi_tables; cur; cur = cur->next)
+  for (cur = acpi_tables.next; cur; cur = cur->next)
     numoftables++;
 
   /* DSDT. */
@@ -749,13 +758,14 @@ grub_cmd_acpi (struct grub_extcmd_context *ctxt, int argc, char **args)
   if (rev2)
     setv2table ();
 
-  for (cur = acpi_tables; cur;)
+  for (cur = acpi_tables.next; cur;)
     {
       t = cur;
       cur = cur->next;
       grub_free (t);
     }
-  acpi_tables = 0;
+  acpi_tables_tail = 0;
+  acpi_tables.next = 0;
 
 #if defined (__i386__) || defined (__x86_64__)
   if (! state[9].set)
